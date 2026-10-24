@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Juego 3D Espacial</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    #hud {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: #fff;
+      font-size: 18px;
+      font-weight: bold;
+      text-shadow: 0 0 8px rgba(0,255,255,0.8);
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    #controls-hint {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #aaa;
+      font-size: 14px;
+      background: rgba(0,0,0,0.6);
+      padding: 8px 16px;
+      border-radius: 20px;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    #game-over {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      background: rgba(10, 10, 25, 0.9);
+      padding: 30px;
+      border-radius: 15px;
+      border: 2px solid #00d2ff;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 15px;
+      z-index: 20;
+    }
+
+    button {
+      padding: 10px 24px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #fff;
+      background: #00d2ff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #0088cc;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+  <div id="hud">
+    <div>Puntos: <span id="score">0</span> / 15</div>
+    <div>Vida: <span id="health">100</span>%</div>
+  </div>
+
+  <div id="controls-hint">
+    Usa <b>Flechas</b> para mover la nave | <b>Espacio</b> para disparar
+  </div>
+
+  <div id="game-over">
+    <h1 id="title">Misión Espacial 🚀</h1>
+    <p id="message">Destruye 15 asteroides con tu láser antes de que destruyan tu nave.</p>
+    <button id="start-btn" onclick="resetGame()">¡Comenzar!</button>
+  </div>
+
+  <script>
+    let scene, camera, renderer;
+    let player, lasers = [], asteroids = [];
+    let score = 0, health = 100;
+    let isPlaying = false;
+    const keys = {};
+
+    function init() {
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x050515, 0.015);
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 5, 15);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      document.body.appendChild(renderer.domElement);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0x00d2ff, 1);
+      dirLight.position.set(10, 20, 10);
+      scene.add(dirLight);
+
+      const playerGroup = new THREE.Group();
+      const bodyGeo = new THREE.ConeGeometry(0.8, 2.5, 4);
+      const bodyMat = new THREE.MeshPhongMaterial({ color: 0x00d2ff, flatShading: true });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.rotation.x = Math.PI / 2;
+      playerGroup.add(body);
+
+      const wingGeo = new THREE.BoxGeometry(2.5, 0.1, 0.8);
+      const wingMat = new THREE.MeshPhongMaterial({ color: 0xff0055 });
+      const wings = new THREE.Mesh(wingGeo, wingMat);
+      wings.position.z = 0.3;
+      playerGroup.add(wings);
+
+      player = playerGroup;
+      player.position.set(0, 0, 0);
+      scene.add(player);
+
+      window.addEventListener('keydown', e => {
+        keys[e.code] = true;
+        if (e.code === 'Space' && isPlaying) shootLaser();
+      });
+      window.addEventListener('keyup', e => keys[e.code] = false);
+
+      window.addEventListener('resize', onWindowResize);
+
+      animate();
+    }
+
+    function shootLaser() {
+      const laserGeo = new THREE.CylinderGeometry(0.08, 0.08, 1, 8);
+      const laserMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+      const laser = new THREE.Mesh(laserGeo, laserMat);
+      laser.rotation.x = Math.PI / 2;
+      laser.position.set(player.position.x, player.position.y, player.position.z - 1.5);
+      scene.add(laser);
+      lasers.push(laser);
+    }
+
+    function spawnAsteroid() {
+      if (!isPlaying) return;
+      const size = Math.random() * 0.8 + 0.6;
+      const geo = new THREE.DodecahedronGeometry(size, 1);
+      const mat = new THREE.MeshPhongMaterial({ color: 0x888899, flatShading: true });
+      const asteroid = new THREE.Mesh(geo, mat);
+
+      asteroid.position.set(
+        (Math.random() - 0.5) * 20,
+        (Math.random() - 0.5) * 10,
+        -50
+      );
+
+      asteroid.userData = {
+        rotX: (Math.random() - 0.5) * 0.05,
+        rotY: (Math.random() - 0.5) * 0.05
+      };
+
+      scene.add(asteroid);
+      asteroids.push(asteroid);
+    }
+
+    function resetGame() {
+      score = 0;
+      health = 100;
+      isPlaying = true;
+
+      document.getElementById('score').innerText = score;
+      document.getElementById('health').innerText = health;
+      document.getElementById('game-over').classList.add('hidden');
+
+      asteroids.forEach(a => scene.remove(a));
+      lasers.forEach(l => scene.remove(l));
+      asteroids = [];
+      lasers = [];
+
+      player.position.set(0, 0, 0);
+    }
+
+    function endGame(win) {
+      isPlaying = false;
+      const menu = document.getElementById('game-over');
+      const title = document.getElementById('title');
+      const msg = document.getElementById('message');
+
+      if (win) {
+        title.innerText = '🏆 ¡VICTORIA!';
+        msg.innerText = '¡Destruiste todos los objetivos!';
+      } else {
+        title.innerText = '💥 MISIÓN FALLIDA';
+        msg.innerText = 'Tu nave fue destruida. Inténtalo de nuevo.';
+      }
+
+      menu.classList.remove('hidden');
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    let spawnTimer = 0;
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (isPlaying) {
+        if (keys['ArrowLeft'] && player.position.x > -10) player.position.x -= 0.2;
+        if (keys['ArrowRight'] && player.position.x < 10) player.position.x += 0.2;
+        if (keys['ArrowUp'] && player.position.y < 5) player.position.y += 0.2;
+        if (keys['ArrowDown'] && player.position.y > -5) player.position.y -= 0.2;
+
+        player.rotation.z = keys['ArrowLeft'] ? 0.3 : keys['ArrowRight'] ? -0.3 : 0;
+
+        spawnTimer++;
+        if (spawnTimer % 30 === 0) spawnAsteroid();
+
+        for (let i = lasers.length - 1; i >= 0; i--) {
+          const l = lasers[i];
+          l.position.z -= 1;
+
+          if (l.position.z < -60) {
+            scene.remove(l);
+            lasers.splice(i, 1);
+          }
+        }
+
+        for (let i = asteroids.length - 1; i >= 0; i--) {
+          const a = asteroids[i];
+          a.position.z += 0.3;
+          a.rotation.x += a.userData.rotX;
+          a.rotation.y += a.userData.rotY;
+
+          for (let j = lasers.length - 1; j >= 0; j--) {
+            const l = lasers[j];
+            if (a.position.distanceTo(l.position) < 1.5) {
+              scene.remove(a);
+              scene.remove(l);
+              asteroids.splice(i, 1);
+              lasers.splice(j, 1);
+
+              score++;
+              document.getElementById('score').innerText = score;
+
+              if (score >= 15) endGame(true);
+              break;
+            }
+          }
+
+          if (a && a.position.distanceTo(player.position) < 1.5) {
+            scene.remove(a);
+            asteroids.splice(i, 1);
+            health -= 25;
+            document.getElementById('health').innerText = health;
+
+            if (health <= 0) endGame(false);
+          }
+
+          if (a && a.position.z > 15) {
+            scene.remove(a);
+            asteroids.splice(i, 1);
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    init();
+  </script>
+</body>
+</html>
